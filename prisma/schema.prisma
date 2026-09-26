@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum RoleName {
+  PLATFORM_ADMIN
+  ORGANIZATION_OWNER
+  ORGANIZATION_ADMIN
+  WORKSPACE_ADMIN
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String
+  passwordHash String
+  active       Boolean      @default(true)
+
+  memberships  Membership[]
+  auditLogs    AuditLog[]   @relation("AuditActor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Organization {
+  id       String             @id @default(cuid())
+  name     String
+  slug     String             @unique
+  status   OrganizationStatus @default(ACTIVE)
+
+  workspaces    Workspace[]
+  memberships   Membership[]
+  subscription  Subscription?
+  auditLogs     AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Workspace {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberships  Membership[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+model Membership {
+  id             String           @id @default(cuid())
+  userId         String
+  organizationId String
+  workspaceId    String?
+  role           RoleName
+  status         MembershipStatus @default(ACTIVE)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace    Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, organizationId, workspaceId])
+  @@index([organizationId])
+  @@index([workspaceId])
+}
+
+model Plan {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  monthlyPrice  Decimal        @db.Decimal(12, 2)
+  maxUsers      Int?
+  maxWorkspaces Int?
+
+  features PlanFeature[]
+  subscriptions Subscription[]
+}
+
+model Feature {
+  id          String        @id @default(cuid())
+  key         String        @unique
+  description String?
+
+  plans PlanFeature[]
+}
+
+model PlanFeature {
+  planId    String
+  featureId String
+
+  plan    Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  feature Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@id([planId, featureId])
+}
+
+model Subscription {
+  id             String             @id @default(cuid())
+  organizationId String             @unique
+  planId         String
+  status         SubscriptionStatus @default(TRIALING)
+  startedAt      DateTime           @default(now())
+  renewsAt       DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planId], references: [id])
+  invoices     Invoice[]
+}
+
+model Invoice {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  amount         Decimal  @db.Decimal(12, 2)
+  currency       String   @default("ZAR")
+  status         String
+  issuedAt       DateTime @default(now())
+  dueAt          DateTime?
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String?
+  actorId        String?
+  action         String
+  resource       String
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  actor        User?         @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([organizationId])
+  @@index([actorId])
+  @@index([createdAt])
+}
